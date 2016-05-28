@@ -32,7 +32,7 @@ public extension Signal {
         let signal = Signal<T>()
         subscribe { result in
             dispatch_after(seconds.dispatchTime, queue) {
-                signal.update(result)
+				signal.update(result: result)
             }
         }
         return signal;

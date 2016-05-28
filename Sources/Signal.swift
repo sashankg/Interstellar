@@ -47,7 +47,7 @@ import Foundation
 public final class Signal<T> {
     
     private var value: Result<T>?
-    private var callbacks: [Result<T> -> Void] = []
+    private var callbacks: [(Result<T>) -> Void] = []
     private let mutex = Mutex()
     
     /// Automatically infer the type of the signal from the argument.
@@ -63,10 +63,10 @@ public final class Signal<T> {
     /**
         Transform the signal into another signal using a function.
     */
-    public func map<U>(f: T -> U) -> Signal<U> {
+    public func map<U>(f: (T) -> U) -> Signal<U> {
         let signal = Signal<U>()
         subscribe { result in
-            signal.update(result.map(f))
+			signal.update(result: result.map(f: f))
         }
         return signal
     }
@@ -74,10 +74,21 @@ public final class Signal<T> {
     /**
         Transform the signal into another signal using a function.
     */
-    public func flatMap<U>(f: T -> Result<U>) -> Signal<U> {
+    public func flatMap<U>(f: (T) -> Result<U>) -> Signal<U> {
         let signal = Signal<U>()
         subscribe { result in
-            signal.update(result.flatMap(f))
+			signal.update(result: result.flatMap(f: f))
+        }
+        return signal
+    }
+	
+    /**
+        Transform the signal into another signal using a function.
+    */
+    public func flatMap<U>(f: (T) throws -> U) -> Signal<U> {
+        let signal = Signal<U>()
+        subscribe { result in
+			signal.update(result: result.flatMap(f: f))
         }
         return signal
     }
@@ -85,21 +96,10 @@ public final class Signal<T> {
     /**
         Transform the signal into another signal using a function.
     */
-    public func flatMap<U>(f: T throws -> U) -> Signal<U> {
+    public func flatMap<U>(f: (T, ((Result<U>)->Void))->Void) -> Signal<U> {
         let signal = Signal<U>()
         subscribe { result in
-            signal.update(result.flatMap(f))
-        }
-        return signal
-    }
-    
-    /**
-        Transform the signal into another signal using a function.
-    */
-    public func flatMap<U>(f: (T, (Result<U>->Void))->Void) -> Signal<U> {
-        let signal = Signal<U>()
-        subscribe { result in
-            result.flatMap(f)(signal.update)
+			result.flatMap(f: f)(signal.update)
         }
         return signal
     }
@@ -108,17 +108,17 @@ public final class Signal<T> {
         Transform the signal into another signal using a function, return the
         value of the inner signal
     */
-    public func flatMap<U>(f: (T -> Signal<U>)) -> Signal<U> {
+    public func flatMap<U>(f: ((T) -> Signal<U>)) -> Signal<U> {
         let signal = Signal<U>()
         subscribe { result in
             switch(result) {
             case let .Success(value):
                 let innerSignal = f(value)
                 innerSignal.subscribe { innerResult in
-                    signal.update(innerResult)
+                    signal.update(result: innerResult)
                 }
             case let .Error(error):
-                signal.update(.Error(error))
+                signal.update(result: .Error(error))
             }
         }
         return signal
@@ -130,10 +130,10 @@ public final class Signal<T> {
         This method can also be used to convert an .Error into a .Success which might be handy
         for retry logic.
     */
-    public func ensure<U>(f: (Result<T>, (Result<U>->Void))->Void) -> Signal<U> {
+    public func ensure<U>(f: (Result<T>, ((Result<U>)->Void))->Void) -> Signal<U> {
         let signal = Signal<U>()
         subscribe { result in
-            f(result) { signal.update($0) }
+            f(result) { signal.update(result: $0) }
         }
         return signal
     }
@@ -142,7 +142,7 @@ public final class Signal<T> {
         Subscribe to the changes of this signal (.Error and .Success).
         This method is chainable.
     */
-    public func subscribe(f: Result<T> -> Void) -> Signal<T> {
+    public func subscribe(f: (Result<T>) -> Void) -> Signal<T> {
         if let value = value {
             f(value)
         }
@@ -152,15 +152,15 @@ public final class Signal<T> {
         return self
     }
     
-    public func filter(f: T -> Bool) -> Signal<T>{
+    public func filter(f: (T) -> Bool) -> Signal<T>{
         let signal = Signal<T>()
         subscribe { result in
             switch(result) {
             case let .Success(value):
                 if f(value) {
-                    signal.update(result)
+                    signal.update(result: result)
                 }
-            case let .Error(error): signal.update(.Error(error))
+            case let .Error(error): signal.update(result: .Error(error))
             }
         }
         return signal
@@ -170,7 +170,7 @@ public final class Signal<T> {
         Subscribe to the changes of this signal (.Success only).
         This method is chainable.
     */
-    public func next(g: T -> Void) -> Signal<T> {
+    public func next(g: (T) -> Void) -> Signal<T> {
         subscribe { result in
             switch(result) {
             case let .Success(value): g(value)
@@ -184,7 +184,7 @@ public final class Signal<T> {
         Subscribe to the changes of this signal (.Error only).
         This method is chainable.
     */
-    public func error(g: ErrorType -> Void) -> Signal<T> {
+    public func error(g: (ErrorProtocol) -> Void) -> Signal<T> {
         subscribe { result in
             switch(result) {
             case .Success(_): return
@@ -207,19 +207,19 @@ public final class Signal<T> {
         let signal = Signal<(T,U)>()
         self.next { a in
             if let b = merge.peek() {
-                signal.update(.Success((a,b)))
+                signal.update(result: .Success((a,b)))
             }
         }
         merge.next { b in
             if let a = self.peek() {
-                signal.update(.Success((a,b)))
+                signal.update(result: .Success((a,b)))
             }
         }
-        let errorHandler = { (error: ErrorType) in
-            signal.update(.Error(error))
+        let errorHandler = { (error: ErrorProtocol) in
+            signal.update(result: .Error(error))
         }
-        self.error(errorHandler)
-        merge.error(errorHandler)
+        self.error(g: errorHandler)
+        merge.error(g: errorHandler)
         return signal
     }
     
@@ -239,15 +239,15 @@ public final class Signal<T> {
         about the new value.
      */
     public func update(value: T) {
-        update(.Success(value))
+        update(result: .Success(value))
     }
     
     /**
         Update the content of the signal. This will notify all subscribers of this signal
         about the new value.
      */
-    public func update(error: ErrorType) {
-        update(.Error(error))
+    public func update(error: ErrorProtocol) {
+        update(result: .Error(error))
     }
     
     /**
@@ -279,7 +279,7 @@ private class Mutex {
         return pthread_mutex_unlock(&mutex)
     }
 
-    func lock(@noescape closure: () -> Void) {
+    func lock(closure: @noescape() -> Void) {
         let status = lock()
         assert(status == 0, "pthread_mutex_lock: \(strerror(status))")
         defer { unlock() }

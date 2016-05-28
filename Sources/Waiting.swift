@@ -25,7 +25,7 @@ import Foundation
 /**
     This error is thrown if the signal doesn't complete within the specified timeout in a wait function.
  */
-public struct TimeoutError: ErrorType {
+public struct TimeoutError: ErrorProtocol {
     internal init() {}
 }
 
@@ -48,13 +48,13 @@ public extension Signal {
     public func wait(timeout: NSTimeInterval? = nil) throws -> T {
         let group = dispatch_group_create()
         var result: Result<T>?
-        dispatch_group_enter(group)
+        dispatch_group_enter(group!)
         subscribe { r in
             result = r
-            dispatch_group_leave(group)
+            dispatch_group_leave(group!)
         }
         let timestamp = timeout.map{ $0.dispatchTime } ?? DISPATCH_TIME_FOREVER
-        if dispatch_group_wait(group, timestamp) != 0 {
+        if dispatch_group_wait(group!, timestamp) != 0 {
             throw TimeoutError()
         }
         switch result! {
